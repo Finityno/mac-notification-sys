@@ -1,6 +1,7 @@
 #import <Cocoa/Cocoa.h>
 #import <CoreServices/CoreServices.h>
 #import <Foundation/Foundation.h>
+#import <UserNotifications/UserNotifications.h>
 #import <objc/runtime.h>
 
 NSString* fakeBundleIdentifier = nil;
@@ -8,6 +9,7 @@ NSString* fakeBundleIdentifier = nil;
 NSString* getBundleIdentifier(NSString* appName);
 BOOL setApplication(NSString* newbundleIdentifier);
 NSDictionary* sendNotification(NSString* title, NSString* subtitle, NSString* message, NSDictionary* options);
+BOOL requestNotificationAuthorization(void);
 
 @implementation NSBundle (swizzle)
 - (NSString*)__bundleIdentifier {

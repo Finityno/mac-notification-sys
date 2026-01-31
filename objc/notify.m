@@ -26,11 +26,110 @@ BOOL setApplication(NSString* newbundleIdentifier) {
     }
 }
 
+// Request notification authorization via UNUserNotificationCenter (macOS 10.14+).
+// Returns YES if authorization was granted, NO otherwise.
+// This blocks until the user responds to the authorization prompt (up to 30 seconds).
+BOOL requestNotificationAuthorization(void) {
+    if (@available(macOS 10.14, *)) {
+        __block BOOL granted = NO;
+        dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
+
+        UNUserNotificationCenter *center = [UNUserNotificationCenter currentNotificationCenter];
+        [center requestAuthorizationWithOptions:(UNAuthorizationOptionAlert | UNAuthorizationOptionSound | UNAuthorizationOptionBadge)
+                              completionHandler:^(BOOL allowed, NSError *error) {
+            if (error) {
+                NSLog(@"Notification authorization error: %@", error);
+            }
+            granted = allowed;
+            dispatch_semaphore_signal(semaphore);
+        }];
+
+        dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, 30 * NSEC_PER_SEC));
+        return granted;
+    }
+    return NO;
+}
+
+// Send a notification via UNUserNotificationCenter (macOS 10.14+).
+// Used for non-interactive (fire-and-forget) notifications.
+// Returns an empty NSDictionary on success, or one with "error" key on failure.
+static NSDictionary* sendNotificationModern(NSString* title, NSString* subtitle, NSString* message, NSDictionary* options) API_AVAILABLE(macos(10.14)) {
+    UNMutableNotificationContent *content = [[UNMutableNotificationContent alloc] init];
+    content.title = title;
+    if (subtitle && ![subtitle isEqualToString:@""]) {
+        content.subtitle = subtitle;
+    }
+    content.body = message;
+
+    // Sound
+    if (options[@"sound"] && ![options[@"sound"] isEqualToString:@""]) {
+        if ([options[@"sound"] isEqualToString:@"NSUserNotificationDefaultSoundName"]) {
+            content.sound = [UNNotificationSound defaultSound];
+        } else {
+            content.sound = [UNNotificationSound soundNamed:options[@"sound"]];
+        }
+    }
+
+    // Delivery date: use a time interval trigger
+    UNNotificationTrigger *trigger = nil;
+    if (options[@"deliveryDate"] && ![options[@"deliveryDate"] isEqualToString:@""]) {
+        double deliveryDate = [options[@"deliveryDate"] doubleValue];
+        NSTimeInterval interval = deliveryDate - [[NSDate date] timeIntervalSince1970];
+        if (interval > 0) {
+            trigger = [UNTimeIntervalNotificationTrigger triggerWithTimeInterval:interval repeats:NO];
+        }
+    }
+
+    NSString *identifier = [[NSUUID UUID] UUIDString];
+    UNNotificationRequest *request = [UNNotificationRequest requestWithIdentifier:identifier
+                                                                          content:content
+                                                                          trigger:trigger];
+
+    __block BOOL success = YES;
+    __block NSString *errorDescription = nil;
+    dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
+
+    [[UNUserNotificationCenter currentNotificationCenter] addNotificationRequest:request
+                                                           withCompletionHandler:^(NSError *error) {
+        if (error) {
+            NSLog(@"Failed to deliver notification via UNUserNotificationCenter: %@", error);
+            success = NO;
+            errorDescription = [error localizedDescription];
+        }
+        dispatch_semaphore_signal(semaphore);
+    }];
+
+    dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
+
+    if (success) {
+        return [[NSDictionary alloc] init];
+    } else {
+        return @{@"error": errorDescription ?: @"unknown error"};
+    }
+}
+
+// Checks whether the notification options require interactive features
+// (buttons, reply, wait for click) that only the legacy API supports.
+static BOOL isInteractiveNotification(NSDictionary* options) {
+    if (options[@"mainButtonLabel"] && ![options[@"mainButtonLabel"] isEqualToString:@""]) return YES;
+    if (options[@"closeButtonLabel"] && ![options[@"closeButtonLabel"] isEqualToString:@""]) return YES;
+    if (options[@"actions"] && ![options[@"actions"] isEqualToString:@""]) return YES;
+    if (options[@"response"] && ![options[@"response"] isEqualToString:@""]) return YES;
+    if (options[@"click"] && [options[@"click"] isEqualToString:@"yes"]) return YES;
+    return NO;
+}
+
 // sendNotification(title: &str, subtitle: &str, message: &str, options: Notification) -> NotificationResult<()>
 NSDictionary* sendNotification(NSString* title, NSString* subtitle, NSString* message, NSDictionary* options) {
     @autoreleasepool {
-        // For a list of available notification options, see https://developer.apple.com/documentation/foundation/nsusernotification?language=objc
+        // Use modern UNUserNotificationCenter for non-interactive notifications on macOS 10.14+
+        if (@available(macOS 10.14, *)) {
+            if (!isInteractiveNotification(options)) {
+                return sendNotificationModern(title, subtitle, message, options);
+            }
+        }
 
+        // Legacy path: NSUserNotificationCenter (for interactive notifications or older macOS)
         NSUserNotificationCenter* notificationCenter = [NSUserNotificationCenter defaultUserNotificationCenter];
         NotificationCenterDelegate* ncDelegate = [[NotificationCenterDelegate alloc] init];
         notificationCenter.delegate = ncDelegate;

@@ -39,6 +39,7 @@ mod sys {
         ) -> Retained<NSDictionary<NSString, NSString>>;
         pub fn setApplication(newbundleIdentifier: *const NSString) -> bool;
         pub fn getBundleIdentifier(appName: *const NSString) -> *const NSString;
+        pub fn requestNotificationAuthorization() -> bool;
     }
 }
 
@@ -115,6 +116,18 @@ fn ensure_application_set() -> NotificationResult<()> {
     };
     let bundle = get_bundle_identifier_or_default("use_default");
     set_application(&bundle)
+}
+
+/// Request notification authorization from the user via UNUserNotificationCenter (macOS 10.14+).
+///
+/// This should be called once during application startup. On macOS 10.14+, it prompts the user
+/// to allow notifications (alert, sound, badge). On older macOS, this is a no-op that returns `true`.
+///
+/// Returns `true` if authorization was granted (or on older macOS), `false` if denied.
+///
+/// This call blocks until the user responds to the authorization prompt.
+pub fn request_authorization() -> bool {
+    unsafe { sys::requestNotificationAuthorization() }
 }
 
 /// Set the application which delivers or schedules a notification

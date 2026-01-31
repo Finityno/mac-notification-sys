@@ -24,6 +24,7 @@ fn main() {
 
         // Link the macOS frameworks that provide the missing symbols:
         println!("cargo:rustc-link-lib=framework=AppKit"); // for NSImage, other UI types
+        println!("cargo:rustc-link-lib=framework=UserNotifications"); // for UNUserNotificationCenter (macOS 10.14+)
 
         println!("cargo:rerun-if-env-changed={}", DEPLOYMENT_TARGET_VAR);
         println!("cargo:rerun-if-changed=build.rs");
